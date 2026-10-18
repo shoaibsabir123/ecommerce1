@@ -1,0 +1,6 @@
+{
+  "name": "AURA & ARTIFACT - Premium Everyday Lifestyle Store",
+  "description": "Discover curated essentials across fashion, electronics, home living, beauty, and travel. Premium quality, best prices, and seamless checkout.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
