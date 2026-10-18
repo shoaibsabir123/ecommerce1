@@ -63,9 +63,18 @@ export const ShopPage: React.FC<ShopPageProps> = ({
       // Active status
       if (!product.active) return false;
 
-      // Category filter
-      if (selectedCategory !== 'all' && product.category !== selectedCategory) {
-        return false;
+      // Category filter (flexible match against id, slug, or matching category object)
+      if (selectedCategory !== 'all') {
+        const targetCategory = storedCategories.find(
+          c => c.id === selectedCategory || c.slug === selectedCategory
+        );
+        const matchesCategory = 
+          product.category === selectedCategory ||
+          (targetCategory && (product.category === targetCategory.id || product.category === targetCategory.slug));
+        
+        if (!matchesCategory) {
+          return false;
+        }
       }
 
       // Search query

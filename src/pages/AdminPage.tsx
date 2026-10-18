@@ -60,6 +60,7 @@ import {
 import { getSupabaseStatus } from '../../src/lib/supabase';
 import { useToast } from '../../src/context/ToastContext';
 import { getProductSvg } from '../../src/utils/productImages';
+import { compressImageFile } from '../../src/utils/imageCompressor';
 
 interface AdminPageProps {
   onNavigateToStorefront: () => void;
@@ -300,9 +301,13 @@ CREATE POLICY "Full access on store settings" ON public.store_settings FOR ALL U
       );
     }
 
-    // Category filter
+    // Category filter (support both ID and slug)
     if (productCategoryFilter !== 'all') {
-      result = result.filter(p => p.category === productCategoryFilter);
+      const catObj = categories.find(c => c.id === productCategoryFilter || c.slug === productCategoryFilter);
+      result = result.filter(p => 
+        p.category === productCategoryFilter || 
+        (catObj && (p.category === catObj.id || p.category === catObj.slug))
+      );
     }
 
     // Status / Inventory filter
@@ -495,11 +500,10 @@ CREATE POLICY "Full access on store settings" ON public.store_settings FOR ALL U
   }, [categories, categorySearch]);
 
   const handleStartAddCategory = () => {
-    const newId = `cat-${Date.now().toString().slice(-4)}`;
     const newCat: CategoryItem = {
-      id: newId,
+      id: '',
       name: '',
-      slug: newId,
+      slug: '',
       icon: 'Sparkles',
       description: 'Curated artisanal collection matching the AURA design philosophy.',
       image: getProductSvg('lamp', '#F59E0B')
@@ -514,10 +518,14 @@ CREATE POLICY "Full access on store settings" ON public.store_settings FOR ALL U
       showToast('Please provide a valid category name.', 'error');
       return;
     }
-    const cleanSlug = editingCategory.slug || editingCategory.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const cleanSlug = (editingCategory.slug?.trim() || editingCategory.name)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '-')
+      .replace(/-+/g, '-');
+
     const toSave: CategoryItem = {
       ...editingCategory,
-      id: editingCategory.id || cleanSlug,
+      id: isAddingCategory ? (cleanSlug || `cat-${Date.now().toString().slice(-4)}`) : (editingCategory.id || cleanSlug),
       slug: cleanSlug
     };
     const saved = saveCategory(toSave);
@@ -1846,20 +1854,19 @@ CREATE POLICY "Full access on store settings" ON public.store_settings FOR ALL U
                                 type="file"
                                 accept="image/*"
                                 className="hidden"
-                                onChange={e => {
+                                onChange={async e => {
                                   const file = e.target.files?.[0];
                                   if (file) {
-                                    const reader = new FileReader();
-                                    reader.onload = evt => {
-                                      const res = evt.target?.result as string;
-                                      if (res) {
-                                        const vars = [...editingProduct.variants];
-                                        vars[vIdx].images = [res, ...(vars[vIdx].images.slice(1))];
-                                        setEditingProduct({ ...editingProduct, variants: vars });
-                                        showToast(`Uploaded ${file.name} for ${v.colorName}!`, 'success');
-                                      }
-                                    };
-                                    reader.readAsDataURL(file);
+                                    try {
+                                      showToast(`Optimizing ${file.name}...`, 'info');
+                                      const compressed = await compressImageFile(file, { maxWidth: 800, maxHeight: 800, quality: 0.84 });
+                                      const vars = [...editingProduct.variants];
+                                      vars[vIdx].images = [compressed, ...(vars[vIdx].images.slice(1))];
+                                      setEditingProduct({ ...editingProduct, variants: vars });
+                                      showToast(`Uploaded & optimized ${file.name} for ${v.colorName}!`, 'success');
+                                    } catch (err: any) {
+                                      showToast(err.message || `Failed to process ${file.name}`, 'error');
+                                    }
                                   }
                                 }}
                               />
@@ -2506,18 +2513,17 @@ CREATE POLICY "Full access on store settings" ON public.store_settings FOR ALL U
                         type="file"
                         accept="image/*"
                         className="hidden"
-                        onChange={e => {
+                        onChange={async e => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            const reader = new FileReader();
-                            reader.onload = evt => {
-                              const res = evt.target?.result as string;
-                              if (res) {
-                                setEditingCategory({ ...editingCategory, image: res });
-                                showToast(`Uploaded ${file.name} for category card!`, 'success');
-                              }
-                            };
-                            reader.readAsDataURL(file);
+                            try {
+                              showToast(`Optimizing ${file.name}...`, 'info');
+                              const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 600, quality: 0.85 });
+                              setEditingCategory({ ...editingCategory, image: compressed });
+                              showToast(`Uploaded card illustration for ${editingCategory.name || 'category'}!`, 'success');
+                            } catch (err: any) {
+                              showToast(err.message || `Failed to process ${file.name}`, 'error');
+                            }
                           }
                         }}
                       />

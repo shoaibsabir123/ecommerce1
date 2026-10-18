@@ -57,6 +57,25 @@ export function unrecordDeletedProductId(id: string) {
   localStorage.setItem(STORAGE_KEYS.DELETED_PRODUCTS, JSON.stringify(ids));
 }
 
+export function safeSetItem(key: string, value: any): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    localStorage.setItem(key, serialized);
+    return true;
+  } catch (err: any) {
+    console.warn(`[Storage Warning] Error writing to ${key}:`, err);
+    try {
+      localStorage.removeItem('aura_supabase_synced_v1');
+      const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+      localStorage.setItem(key, serialized);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function safeExecute(fn: () => PromiseLike<any>) {
   try {
     Promise.resolve(fn()).catch((err: unknown) => {
@@ -198,29 +217,87 @@ export async function syncWithSupabase() {
       client.from('store_settings').select('*').limit(1)
     ]);
 
-    if (!prodRes.error && prodRes.data) {
-      if (prodRes.data.length > 0) {
-        const deletedIds = getDeletedProductIds();
-        const rawProducts = prodRes.data.filter((p: any) => !deletedIds.includes(p.id));
-        const rawVariants = varRes.data || [];
+    // 1. SMART MERGE PRODUCTS: Preserve locally created products and merge remote ones
+    if (!prodRes.error && prodRes.data && prodRes.data.length > 0) {
+      const deletedIds = getDeletedProductIds();
+      const rawProducts = prodRes.data.filter((p: any) => !deletedIds.includes(p.id));
+      const rawVariants = varRes.data || [];
 
-        const mergedProducts: Product[] = rawProducts.map(p => {
-          const itemVariants = rawVariants
-            .filter(v => v.product_id === p.id)
-            .map(mapDbVariant);
-          return mapDbProduct(p, itemVariants);
-        });
+      const remoteProducts: Product[] = rawProducts.map(p => {
+        const itemVariants = rawVariants
+          .filter(v => v.product_id === p.id)
+          .map(mapDbVariant);
+        return mapDbProduct(p, itemVariants);
+      });
 
-        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(mergedProducts));
-      }
+      // Retrieve current local products to prevent dropping custom creations
+      const currentLocalProducts = (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
+          return raw ? (JSON.parse(raw) as Product[]).filter(p => !deletedIds.includes(p.id)) : [];
+        } catch {
+          return [];
+        }
+      })();
+
+      const productMap = new Map<string, Product>();
+      // Seed map with remote products
+      remoteProducts.forEach(rp => productMap.set(rp.id, rp));
+
+      // Preserve local products that are not in Supabase yet
+      currentLocalProducts.forEach(lp => {
+        if (!productMap.has(lp.id) && !deletedIds.includes(lp.id)) {
+          productMap.set(lp.id, lp);
+          // Proactively upload newly added local product to Supabase in background
+          safeExecute(async () => {
+            await client.from('products').upsert({
+              id: lp.id,
+              name: lp.name,
+              slug: lp.slug,
+              brand: lp.brand,
+              category: lp.category,
+              price: lp.price,
+              sale_price: lp.salePrice || null,
+              rating: lp.rating,
+              review_count: lp.reviewCount,
+              description: lp.description,
+              details: lp.details,
+              specifications: lp.specifications,
+              shipping_info: lp.shippingInfo,
+              featured: lp.featured,
+              trending: lp.trending,
+              is_new: lp.isNew || false,
+              active: lp.active,
+              default_variant_id: lp.defaultVariantId,
+              created_at: lp.createdAt
+            });
+
+            const varsToUpsert = lp.variants.map(v => ({
+              id: v.id,
+              product_id: lp.id,
+              color_name: v.colorName,
+              color_hex: v.colorHex,
+              sku: v.sku,
+              price: v.price || null,
+              sale_price: v.salePrice || null,
+              stock: v.stock,
+              images: v.images
+            }));
+            await client.from('product_variants').upsert(varsToUpsert);
+          });
+        }
+      });
+
+      safeSetItem(STORAGE_KEYS.PRODUCTS, Array.from(productMap.values()));
     }
 
     if (!orderRes.error && orderRes.data && orderRes.data.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orderRes.data));
+      safeSetItem(STORAGE_KEYS.ORDERS, orderRes.data);
     }
 
+    // 2. SMART MERGE CATEGORIES: Preserve locally created categories
     if (!catRes.error && catRes.data && catRes.data.length > 0) {
-      const cats: CategoryItem[] = catRes.data.map((c: any) => ({
+      const remoteCats: CategoryItem[] = catRes.data.map((c: any) => ({
         id: c.id,
         name: c.name,
         slug: c.slug || c.id,
@@ -228,7 +305,37 @@ export async function syncWithSupabase() {
         description: c.description || '',
         image: c.image || ''
       }));
-      localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(cats));
+
+      const currentLocalCats = (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+          return raw ? (JSON.parse(raw) as CategoryItem[]) : INITIAL_CATEGORIES;
+        } catch {
+          return INITIAL_CATEGORIES;
+        }
+      })();
+
+      const categoryMap = new Map<string, CategoryItem>();
+      remoteCats.forEach(rc => categoryMap.set(rc.id, rc));
+
+      // Keep local categories that haven't synced to Supabase yet
+      currentLocalCats.forEach(lc => {
+        if (!categoryMap.has(lc.id)) {
+          categoryMap.set(lc.id, lc);
+          safeExecute(async () => {
+            await client.from('categories').upsert({
+              id: lc.id,
+              name: lc.name,
+              slug: lc.slug || lc.id,
+              icon: lc.icon,
+              description: lc.description,
+              image: lc.image
+            });
+          });
+        }
+      });
+
+      safeSetItem(STORAGE_KEYS.CATEGORIES, Array.from(categoryMap.values()));
     }
 
     if (!setRes.error && setRes.data && setRes.data.length > 0) {
@@ -316,17 +423,17 @@ export function getCategories(): CategoryItem[] {
     categories = INITIAL_CATEGORIES;
   }
 
-  // Calculate live assigned product counts
+  // Calculate live assigned product counts (check both id AND slug)
   const products = getProducts();
   return categories.map(cat => ({
     ...cat,
-    count: products.filter(p => p.category === cat.id).length
+    count: products.filter(p => p.category === cat.id || p.category === cat.slug).length
   }));
 }
 
 export function getCategoryById(id: string): CategoryItem | undefined {
   const categories = getCategories();
-  return categories.find(c => c.id === id);
+  return categories.find(c => c.id === id || c.slug === id);
 }
 
 export function saveCategory(category: CategoryItem): CategoryItem {
@@ -345,13 +452,13 @@ export function saveCategory(category: CategoryItem): CategoryItem {
     ...category,
     id: cleanId,
     name: category.name.trim(),
-    slug: category.slug || cleanId,
+    slug: category.slug ? category.slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') : cleanId,
     icon: category.icon || 'Package',
     description: category.description || '',
     image: category.image || ''
   };
 
-  const existingIndex = rawList.findIndex((c: any) => c.id === cleanCategory.id);
+  const existingIndex = rawList.findIndex((c: any) => c.id === cleanCategory.id || c.slug === cleanCategory.slug);
   let updatedList: CategoryItem[];
   if (existingIndex >= 0) {
     updatedList = [...rawList];
@@ -360,7 +467,7 @@ export function saveCategory(category: CategoryItem): CategoryItem {
     updatedList = [...rawList, cleanCategory];
   }
 
-  localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(updatedList));
+  safeSetItem(STORAGE_KEYS.CATEGORIES, updatedList);
   emitStoreUpdate();
 
   const client = getSupabaseClient();
@@ -394,14 +501,14 @@ export function deleteCategory(categoryId: string): { success: boolean; message:
   const products = getProducts();
   const affectedCount = products.filter(p => p.category === categoryId).length;
 
-  const updatedList = rawList.filter((c: any) => c.id !== categoryId);
-  localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(updatedList));
+  const updatedList = rawList.filter((c: any) => c.id !== categoryId && c.slug !== categoryId);
+  safeSetItem(STORAGE_KEYS.CATEGORIES, updatedList);
   emitStoreUpdate();
 
   const client = getSupabaseClient();
   if (client) {
     safeExecute(async () => {
-      await client.from('categories').delete().eq('id', categoryId);
+      await client.from('categories').delete().or(`id.eq.${categoryId},slug.eq.${categoryId}`);
     });
   }
 
@@ -672,7 +779,7 @@ export function saveProduct(product: Product): Product {
     updated = [product, ...current];
   }
 
-  localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updated));
+  safeSetItem(STORAGE_KEYS.PRODUCTS, updated);
   emitStoreUpdate();
 
   // If Supabase is connected, persist remotely in background
@@ -723,7 +830,7 @@ export function deleteProduct(productId: string): boolean {
   recordDeletedProductId(productId);
   const current = getProducts();
   const updated = current.filter(p => p.id !== productId);
-  localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updated));
+  safeSetItem(STORAGE_KEYS.PRODUCTS, updated);
   emitStoreUpdate();
 
   const client = getSupabaseClient();

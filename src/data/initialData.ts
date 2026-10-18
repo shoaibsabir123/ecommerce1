@@ -1,14 +1,14 @@
-import { Product, BlogPost, Coupon, UserProfile, Order } from '../types';
+import { Product, BlogPost, Coupon, UserProfile, Order, CategoryItem } from '../types';
 import { getProductSvg } from '../utils/productImages';
 
-export const INITIAL_CATEGORIES = [
-  { id: 'accessories', name: 'Accessories', icon: 'Glasses', count: 18, image: getProductSvg('sunglasses', '#1E293B', '#D4AF37') },
-  { id: 'electronics', name: 'Electronics', icon: 'Headphones', count: 24, image: getProductSvg('headphones', '#18181B', '#CBD5E1') },
-  { id: 'home-living', name: 'Home & Living', icon: 'Lamp', count: 32, image: getProductSvg('lamp', '#F59E0B') },
-  { id: 'fashion', name: 'Fashion', icon: 'Shirt', count: 45, image: getProductSvg('backpack', '#D4A373') },
-  { id: 'beauty', name: 'Beauty', icon: 'Sparkles', count: 19, image: getProductSvg('serum', '#B45309') },
-  { id: 'sports', name: 'Sports', icon: 'Dumbbell', count: 15, image: getProductSvg('dumbbells', '#334155') },
-  { id: 'toys-games', name: 'Toys & Games', icon: 'Gamepad2', count: 12, image: getProductSvg('teddy', '#92400E') },
+export const INITIAL_CATEGORIES: CategoryItem[] = [
+  { id: 'accessories', name: 'Accessories', slug: 'accessories', icon: 'Glasses', count: 18, image: getProductSvg('sunglasses', '#1E293B', '#D4AF37') },
+  { id: 'electronics', name: 'Electronics', slug: 'electronics', icon: 'Headphones', count: 24, image: getProductSvg('headphones', '#18181B', '#CBD5E1') },
+  { id: 'home-living', name: 'Home & Living', slug: 'home-living', icon: 'Lamp', count: 32, image: getProductSvg('lamp', '#F59E0B') },
+  { id: 'fashion', name: 'Fashion', slug: 'fashion', icon: 'Shirt', count: 45, image: getProductSvg('backpack', '#D4A373') },
+  { id: 'beauty', name: 'Beauty', slug: 'beauty', icon: 'Sparkles', count: 19, image: getProductSvg('serum', '#B45309') },
+  { id: 'sports', name: 'Sports', slug: 'sports', icon: 'Dumbbell', count: 15, image: getProductSvg('dumbbells', '#334155') },
+  { id: 'toys-games', name: 'Toys & Games', slug: 'toys-games', icon: 'Gamepad2', count: 12, image: getProductSvg('teddy', '#92400E') },
 ];
 
 export const INITIAL_PRODUCTS: Product[] = [
